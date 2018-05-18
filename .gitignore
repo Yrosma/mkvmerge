@@ -1,5 +1,5 @@
 python/__pycache__/
 python/.vscode/
-tmp/
-2do/
-done/
+tmp/*
+2do/*
+done/*
