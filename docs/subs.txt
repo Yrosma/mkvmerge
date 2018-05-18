@@ -1,0 +1,221 @@
+
+http://stackabuse.com/python-list-files-in-a-directory/
+
+
+
+
+@ECHO OFF
+ECHO Extracting all .mkv subtitle tracks in current folder.
+ECHO.
+ECHO.
+FOR %%A IN (*.mkv) DO (
+FOR /F %%I IN ('mkvmerge --identify "%%A" ^| FIND /C "Track ID"') DO (
+IF %%I GTR 0 (
+ECHO Analyzing "%%~nxA"
+FOR /L %%T IN (0,1,%%I) DO (
+mkvmerge.exe --identify "%%~dpnxA" | FIND /C "Track ID %%T: subtitles">NUL
+IF NOT ERRORLEVEL 1 mkvextract.exe tracks "%%~dpnxA" %%T:"%%~dpnA-ID%%T".srt
+)
+)
+ECHO.
+ECHO.
+))
+ECHO.
+ECHO.
+ECHO The end.....
+PAUSE
+
+
+
+@echo off
+cls
+set rootfolder=C:\
+echo Enumerating all MKVs under %rootfolder%
+echo.
+for /r %rootfolder% %%a in (*.mkv) do (
+    for /f %%b in ('mkvmerge --identify-verbose "%%a" ^| find /c /i "subtitles"') do (
+        if [%%b]==[0] (
+            echo "%%a" has no subtitles
+        ) else (
+            echo.
+            echo "%%a" has subtitles
+            mkvmerge -q -o "%%~dpna (No Subs)%%~xa" -S "%%a"
+            if errorlevel 1 (
+                echo Warnings/errors generated during remuxing, original file not deleted
+            ) else (
+                del /f "%%a"
+                echo Successfully remuxed to "%%~dpna (No Subs)%%~xa", original file deleted
+            )
+            echo.
+        )
+    )
+)
+
+
+
+
+
+
+
+Identify english subtitles in MKV video files with GNU sed:
+
+@echo off&setlocal
+set "rootfolder=C:\video\test"
+echo Enumerating all MKVs under %rootfolder%
+echo.
+for /r "%rootfolder%" %%a in (*.mkv) do (
+    for /f %%b in ('mkvmerge  --ui-language en -i "%%a" ^| find /c /i "subtitles"') do (
+        if "%%b"=="0" (
+            echo(%%a has no subtitles
+        ) else (
+            echo(%%a has subtitles
+            set "line="
+            for /f "delims=" %%i in ('mkvmerge --ui-language en --identify-verbose "%%a" ^| sed "/subtitles/!d;/language:eng/!d;s/.* \([0-9]*\):.*/\1/"') do (
+                echo(english Track ID: %%i
+                call set line=%%line%% %%i:"%%~dpna (Sub Track %%i).sub"
+            )
+            setlocal enabledelayedexpansion
+            mkvextract tracks "%%a" --ui-language en !line! ||(echo Demuxing error!&goto:eof)
+            endlocal
+            mkvmerge -q -o "%%~dpna (No Subs)%%~xa" -S "%%a"
+            if errorlevel 1 (
+                echo Warnings/errors generated during remuxing, original file not deleted
+            ) else (
+                del /f "%%a"
+                echo Successfully remuxed to "%%~dpna (No Subs)%%~xa", original file deleted
+            )
+            echo(
+        )
+    )
+)
+
+
+
+
+
+
+To extract all those fonts:
+
+ffmpeg -dump_attachment:t "" -i input.mkv
+
+(ffmpeg will spit out an error but the fonts will be extracted)
+
+To copy subtitles and fonts to new MKV
+
+ffmpeg -i new.mp4 -i old.mkv -c copy -map 0 -map 1:s -map 1:t new.mkv
+
+
+
+
+
+
+
+
+#!/bin/sh
+
+if ! command -v mkvmerge mkvextract >/dev/null 2>&1; then
+    echo >&2 "Tools mkvmerge & mkvextract are required. Install package mkvtoolnix."
+    exit 1
+fi
+
+filename=$1
+
+if [ ! -f $filename ]; then
+    echo "File not found."
+    exit 1
+fi
+
+filename_no_ext=$(echo $1 | sed -r 's/.mkv//')
+sed_exp='s/.*([0-9]+):.*language:([a-z]+).*/\1:'$filename_no_ext'.\2.\1.srt/'
+
+mkvmerge -I $filename | grep subtitles | sed -r $sed_exp | xargs mkvextract tracks $filename
+
+
+
+Fails when there are more than 10 tracks, fails if the subtitles are vobsub (because mkvextract will then ditch anything beyond the first dot, and make two files named .idx and .sub respectively -- probably a bug in mkvextract, it should split off at the last dot, not the first).
+
+Here's a sed-line that fixes the first and works around the second.
+sed_exp='s/Track\sID\s([0-9]{1,3}):.language:([a-z]+)./\1:'$filename_no_ext'-\1-\2/'
+
+
+
+And in order to make this work with filenames containing the path, you need to do this:
+
+filename_no_ext=$(basename $1 .mkv)
+
+
+
+
+
+
+
+
+Install mkvtoolnix with sudo apt-get install mkvtoolnix.
+
+Run from terminal: mkvextract tracks <your_mkv_video> <track_numer>:<subtitle_file.srt>
+
+Use mkvinfo to get information about tracks.
+
+Using this utility you can extract any track, even audio or video.
+
+do not use mkvinfo as it says things like "Track number: 2 (track ID for mkvmerge & mkvextract: 1)" which are confusing. use mkvmerge -i <filename>
+
+#!/bin/bash
+# Extract subtitles from each MKV file in the given directory
+
+# If no directory is given, work in local dir
+if [ "$1" = "" ]; then
+  DIR="."
+else
+  DIR="$1"
+fi
+
+# Get all the MKV files in this dir and its subdirs
+find "$DIR" -type f -name '*.mkv' | while read filename
+do
+  # Find out which tracks contain the subtitles
+  mkvmerge -i "$filename" | grep 'subtitles' | while read subline
+  do
+    # Grep the number of the subtitle track
+    tracknumber=`echo $subline | egrep -o "[0-9]{1,2}" | head -1`
+
+    # Get base name for subtitle
+    subtitlename=${filename%.*}
+
+    # Extract the track to a .tmp file
+    `mkvextract tracks "$filename" $tracknumber:"$subtitlename.srt.tmp" > /dev/null 2>&1`
+    `chmod g+rw "$subtitlename.srt.tmp"`
+
+
+    # Do a super-primitive language guess: ENGLISH
+    langtest=`egrep -ic ' you | to | the ' "$subtitlename".srt.tmp`
+    trimregex=""
+
+
+
+    # Check if subtitle passes our language filter (10 or more matches)
+    if [ $langtest -ge 10 ]; then
+      # Regex to remove credits at the end of subtitles (read my reason why!)
+      `sed 's/\r//g' < "$subtitlename.srt.tmp" \
+        | sed 's/%/%%/g' \
+        | awk '{if (a){printf("\t")};printf $0; a=1; } /^$/{print ""; a=0;}' \
+        | grep -iv "$trimregex" \
+        | sed 's/\t/\r\n/g' > "$subtitlename.srt"`
+      `rm "$subtitlename.srt.tmp"`
+      `chmod g+rw "$subtitlename.srt"`
+    else
+      # Not our desired language: add a number to the filename and keep anyway, just in case
+      `mv "$subtitlename.srt.tmp" "$subtitlename.$tracknumber.srt" > /dev/null 2>&1`
+    fi
+  done
+done
+
+
+
+
+
+
+
+
+
+
